@@ -3,8 +3,8 @@
 
 generator client {
   provider      = "prisma-client-js"
-  // Use Debian binary target for NixOS compatibility (NixOS doesn't have prebuilt binaries)
-  binaryTargets = ["native", "debian-openssl-3.0.x"]
+  // Force Debian binary target for NixOS compatibility
+  binaryTargets = ["debian-openssl-3.0.x"]
 }
 
 datasource db {
