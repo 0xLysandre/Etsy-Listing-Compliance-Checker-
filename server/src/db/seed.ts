@@ -1,6 +1,3 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
 import { db, pool } from './index.js';
 import { policyRules, violations, violationChecks } from './schema.js';
 import type { Severity } from './schema.js';
