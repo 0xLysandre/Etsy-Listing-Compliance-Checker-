@@ -1,42 +1,53 @@
 import { Response, NextFunction } from 'express';
-import { prisma } from '../config/database.js';
+import { eq, and, asc } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { policyRules } from '../db/schema.js';
+import type { Severity } from '../db/schema.js';
 import { NotFoundError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
-import { ApiResponse } from '../types/index.js';
 
 // Get all policy rules
 export const getPolicyRules = async (
   req: AuthRequest,
-  res: Response<ApiResponse>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
     const { category, severity } = req.query;
 
-    const where: { category?: string; severity?: string; isActive: boolean } = {
-      isActive: true,
-    };
+    let rules;
 
-    if (category && typeof category === 'string') {
-      where.category = category;
+    if (category && severity) {
+      rules = await db.query.policyRules.findMany({
+        where: and(
+          eq(policyRules.isActive, true),
+          eq(policyRules.category, category as string),
+          eq(policyRules.severity, (severity as string).toUpperCase() as Severity)
+        ),
+        orderBy: [asc(policyRules.category)],
+      });
+    } else if (category) {
+      rules = await db.query.policyRules.findMany({
+        where: and(
+          eq(policyRules.isActive, true),
+          eq(policyRules.category, category as string)
+        ),
+        orderBy: [asc(policyRules.category)],
+      });
+    } else if (severity) {
+      rules = await db.query.policyRules.findMany({
+        where: and(
+          eq(policyRules.isActive, true),
+          eq(policyRules.severity, (severity as string).toUpperCase() as Severity)
+        ),
+        orderBy: [asc(policyRules.category)],
+      });
+    } else {
+      rules = await db.query.policyRules.findMany({
+        where: eq(policyRules.isActive, true),
+        orderBy: [asc(policyRules.category)],
+      });
     }
-
-    if (severity && typeof severity === 'string') {
-      where.severity = severity.toUpperCase();
-    }
-
-    const rules = await prisma.policyRule.findMany({
-      where,
-      orderBy: [{ category: 'asc' }, { severity: 'desc' }],
-      select: {
-        id: true,
-        category: true,
-        ruleName: true,
-        ruleText: true,
-        severity: true,
-        keywords: true,
-      },
-    });
 
     // Group rules by category
     const groupedRules = rules.reduce(
@@ -66,12 +77,12 @@ export const getPolicyRules = async (
 // Get a specific policy rule
 export const getPolicyRule = async (
   req: AuthRequest,
-  res: Response<ApiResponse>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
-    const rule = await prisma.policyRule.findUnique({
-      where: { id: req.params.id },
+    const rule = await db.query.policyRules.findFirst({
+      where: eq(policyRules.id, req.params.id),
     });
 
     if (!rule) {

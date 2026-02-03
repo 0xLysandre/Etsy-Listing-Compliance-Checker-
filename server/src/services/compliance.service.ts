@@ -1,5 +1,7 @@
-import { prisma } from '../config/database.js';
-import { Severity, CheckStatus, PolicyRule, Listing } from '@prisma/client';
+import { eq } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { listings, policyRules, violationChecks, violations } from '../db/schema.js';
+import type { Severity, CheckStatus, Listing, PolicyRule } from '../db/schema.js';
 
 export interface ViolationMatch {
   policyRuleId: string;
@@ -11,28 +13,28 @@ export interface ViolationMatch {
 
 // Check a listing against all active policy rules
 export async function checkListingCompliance(listing: Listing): Promise<ViolationMatch[]> {
-  const violations: ViolationMatch[] = [];
+  const foundViolations: ViolationMatch[] = [];
 
   // Get all active policy rules
-  const policyRules = await prisma.policyRule.findMany({
-    where: { isActive: true },
+  const rules = await db.query.policyRules.findMany({
+    where: eq(policyRules.isActive, true),
   });
 
   // Combine all text content to check
   const textToCheck = [
     listing.title,
     listing.description,
-    ...listing.tags,
-    ...listing.materials,
+    ...(listing.tags || []),
+    ...(listing.materials || []),
   ]
     .join(' ')
     .toLowerCase();
 
-  for (const rule of policyRules) {
-    const matchedKeywords = checkKeywords(textToCheck, rule.keywords);
+  for (const rule of rules) {
+    const matchedKeywords = checkKeywords(textToCheck, rule.keywords || []);
 
     if (matchedKeywords.length > 0) {
-      violations.push({
+      foundViolations.push({
         policyRuleId: rule.id,
         violationText: rule.ruleText,
         severity: rule.severity,
@@ -42,7 +44,7 @@ export async function checkListingCompliance(listing: Listing): Promise<Violatio
     }
   }
 
-  return violations;
+  return foundViolations;
 }
 
 // Check for keyword matches
@@ -85,8 +87,8 @@ export async function runComplianceCheck(listingId: string): Promise<{
   status: CheckStatus;
 }> {
   // Get the listing
-  const listing = await prisma.listing.findUnique({
-    where: { id: listingId },
+  const listing = await db.query.listings.findFirst({
+    where: eq(listings.id, listingId),
   });
 
   if (!listing) {
@@ -94,40 +96,42 @@ export async function runComplianceCheck(listingId: string): Promise<{
   }
 
   // Create the violation check record
-  const check = await prisma.violationCheck.create({
-    data: {
+  const [check] = await db
+    .insert(violationChecks)
+    .values({
       listingId,
-      status: CheckStatus.IN_PROGRESS,
-    },
-  });
+      status: 'IN_PROGRESS',
+    })
+    .returning();
 
   try {
     // Run the compliance check
-    const violations = await checkListingCompliance(listing);
+    const foundViolations = await checkListingCompliance(listing);
 
     // Save violations
-    if (violations.length > 0) {
-      await prisma.violation.createMany({
-        data: violations.map((v) => ({
+    if (foundViolations.length > 0) {
+      await db.insert(violations).values(
+        foundViolations.map((v) => ({
           checkId: check.id,
           policyRuleId: v.policyRuleId,
           violationText: v.violationText,
           severity: v.severity,
           suggestion: v.suggestion,
           matchedText: v.matchedText,
-        })),
-      });
+        }))
+      );
     }
 
     // Update the check with results
-    const updatedCheck = await prisma.violationCheck.update({
-      where: { id: check.id },
-      data: {
-        violationsFound: violations.length,
-        status: CheckStatus.COMPLETED,
+    const [updatedCheck] = await db
+      .update(violationChecks)
+      .set({
+        violationsFound: foundViolations.length,
+        status: 'COMPLETED' as CheckStatus,
         completedAt: new Date(),
-      },
-    });
+      })
+      .where(eq(violationChecks.id, check.id))
+      .returning();
 
     return {
       checkId: updatedCheck.id,
@@ -136,12 +140,12 @@ export async function runComplianceCheck(listingId: string): Promise<{
     };
   } catch (error) {
     // Mark check as failed
-    await prisma.violationCheck.update({
-      where: { id: check.id },
-      data: {
-        status: CheckStatus.FAILED,
-      },
-    });
+    await db
+      .update(violationChecks)
+      .set({
+        status: 'FAILED' as CheckStatus,
+      })
+      .where(eq(violationChecks.id, check.id));
 
     throw error;
   }

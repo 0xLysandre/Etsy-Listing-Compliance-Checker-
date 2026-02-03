@@ -3,19 +3,19 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 
+// Load environment variables first
+dotenv.config();
+
 import { corsOptions } from './config/cors.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { apiLimiter } from './middleware/rateLimit.js';
-import { prisma } from './config/database.js';
+import { pool } from './db/index.js';
 
 // Routes
 import authRoutes from './routes/auth.routes.js';
 import listingsRoutes from './routes/listings.routes.js';
 import checksRoutes from './routes/checks.routes.js';
 import rulesRoutes from './routes/rules.routes.js';
-
-// Load environment variables
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -49,7 +49,7 @@ app.use(errorHandler);
 // Graceful shutdown
 const gracefulShutdown = async () => {
   console.log('Shutting down gracefully...');
-  await prisma.$disconnect();
+  await pool.end();
   process.exit(0);
 };
 

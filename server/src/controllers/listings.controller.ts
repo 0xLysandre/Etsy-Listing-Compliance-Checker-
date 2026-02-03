@@ -1,9 +1,11 @@
 import { Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { prisma } from '../config/database.js';
+import { eq, desc, sql } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { listings, violationChecks } from '../db/schema.js';
 import { BadRequestError, ForbiddenError, NotFoundError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
-import { ApiResponse, SUBSCRIPTION_LIMITS } from '../types/index.js';
+import { SUBSCRIPTION_LIMITS } from '../types/index.js';
 
 // Validation schemas
 const createListingSchema = z.object({
@@ -22,7 +24,7 @@ const updateListingSchema = createListingSchema.partial();
 // Create a new listing
 export const createListing = async (
   req: AuthRequest,
-  res: Response<ApiResponse>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
@@ -32,9 +34,12 @@ export const createListing = async (
     }
 
     // Check subscription limits
-    const listingCount = await prisma.listing.count({
-      where: { userId: req.user!.id },
-    });
+    const listingCountResult = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(listings)
+      .where(eq(listings.userId, req.user!.id));
+
+    const listingCount = listingCountResult[0]?.count || 0;
 
     const limits = SUBSCRIPTION_LIMITS[req.user!.subscriptionTier];
     if (limits.maxListings !== -1 && listingCount >= limits.maxListings) {
@@ -43,12 +48,14 @@ export const createListing = async (
       );
     }
 
-    const listing = await prisma.listing.create({
-      data: {
+    const [listing] = await db
+      .insert(listings)
+      .values({
         ...validation.data,
+        price: validation.data.price.toString(),
         userId: req.user!.id,
-      },
-    });
+      })
+      .returning();
 
     res.status(201).json({
       success: true,
@@ -62,46 +69,45 @@ export const createListing = async (
 // Get all listings for the current user
 export const getListings = async (
   req: AuthRequest,
-  res: Response<ApiResponse>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 10));
-    const skip = (page - 1) * limit;
+    const offset = (page - 1) * limit;
 
-    const [listings, total] = await Promise.all([
-      prisma.listing.findMany({
-        where: { userId: req.user!.id },
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          _count: {
-            select: {
-              violationChecks: true,
-            },
-          },
-          violationChecks: {
-            take: 1,
-            orderBy: { checkDate: 'desc' },
-            select: {
-              id: true,
-              checkDate: true,
-              violationsFound: true,
-              status: true,
-            },
-          },
+    const userListings = await db.query.listings.findMany({
+      where: eq(listings.userId, req.user!.id),
+      offset,
+      limit,
+      orderBy: desc(listings.createdAt),
+      with: {
+        violationChecks: {
+          limit: 1,
+          orderBy: desc(violationChecks.checkDate),
         },
-      }),
-      prisma.listing.count({
-        where: { userId: req.user!.id },
-      }),
-    ]);
+      },
+    });
+
+    const totalResult = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(listings)
+      .where(eq(listings.userId, req.user!.id));
+
+    const total = totalResult[0]?.count || 0;
+
+    // Transform to include _count
+    const listingsWithCount = userListings.map(listing => ({
+      ...listing,
+      _count: {
+        violationChecks: listing.violationChecks?.length || 0,
+      },
+    }));
 
     res.json({
       success: true,
-      data: listings,
+      data: listingsWithCount,
       meta: {
         page,
         limit,
@@ -117,26 +123,20 @@ export const getListings = async (
 // Get a single listing
 export const getListing = async (
   req: AuthRequest,
-  res: Response<ApiResponse>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
-    const listing = await prisma.listing.findUnique({
-      where: { id: req.params.id },
-      include: {
+    const listing = await db.query.listings.findFirst({
+      where: eq(listings.id, req.params.id),
+      with: {
         violationChecks: {
-          orderBy: { checkDate: 'desc' },
-          take: 5,
-          include: {
+          limit: 5,
+          orderBy: desc(violationChecks.checkDate),
+          with: {
             violations: {
-              include: {
-                policyRule: {
-                  select: {
-                    id: true,
-                    ruleName: true,
-                    category: true,
-                  },
-                },
+              with: {
+                policyRule: true,
               },
             },
           },
@@ -160,7 +160,7 @@ export const getListing = async (
 // Update a listing
 export const updateListing = async (
   req: AuthRequest,
-  res: Response<ApiResponse>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
@@ -169,10 +169,17 @@ export const updateListing = async (
       throw BadRequestError(validation.error.errors[0].message);
     }
 
-    const listing = await prisma.listing.update({
-      where: { id: req.params.id },
-      data: validation.data,
-    });
+    const updateData = {
+      ...validation.data,
+      price: validation.data.price?.toString(),
+      updatedAt: new Date(),
+    };
+
+    const [listing] = await db
+      .update(listings)
+      .set(updateData)
+      .where(eq(listings.id, req.params.id))
+      .returning();
 
     res.json({
       success: true,
@@ -186,13 +193,11 @@ export const updateListing = async (
 // Delete a listing
 export const deleteListing = async (
   req: AuthRequest,
-  res: Response<ApiResponse>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
-    await prisma.listing.delete({
-      where: { id: req.params.id },
-    });
+    await db.delete(listings).where(eq(listings.id, req.params.id));
 
     res.json({
       success: true,

@@ -2,10 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { prisma } from '../config/database.js';
+import { eq } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { users } from '../db/schema.js';
 import { BadRequestError, ConflictError, UnauthorizedError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
-import { ApiResponse, AuthResponse } from '../types/index.js';
 
 // Validation schemas
 const registerSchema = z.object({
@@ -30,7 +31,7 @@ const generateToken = (userId: string, email: string): string => {
 // Register new user
 export const register = async (
   req: Request,
-  res: Response<ApiResponse<AuthResponse>>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
@@ -42,8 +43,8 @@ export const register = async (
     const { email, password } = validation.data;
 
     // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email },
+    const existingUser = await db.query.users.findFirst({
+      where: eq(users.email, email),
     });
 
     if (existingUser) {
@@ -55,18 +56,18 @@ export const register = async (
     const passwordHash = await bcrypt.hash(password, salt);
 
     // Create user
-    const user = await prisma.user.create({
-      data: {
+    const [user] = await db
+      .insert(users)
+      .values({
         email,
         passwordHash,
-      },
-      select: {
-        id: true,
-        email: true,
-        subscriptionTier: true,
-        subscriptionStatus: true,
-      },
-    });
+      })
+      .returning({
+        id: users.id,
+        email: users.email,
+        subscriptionTier: users.subscriptionTier,
+        subscriptionStatus: users.subscriptionStatus,
+      });
 
     // Generate token
     const token = generateToken(user.id, user.email);
@@ -86,7 +87,7 @@ export const register = async (
 // Login user
 export const login = async (
   req: Request,
-  res: Response<ApiResponse<AuthResponse>>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
@@ -98,8 +99,8 @@ export const login = async (
     const { email, password } = validation.data;
 
     // Find user
-    const user = await prisma.user.findUnique({
-      where: { email },
+    const user = await db.query.users.findFirst({
+      where: eq(users.email, email),
     });
 
     if (!user) {
@@ -135,29 +136,33 @@ export const login = async (
 // Get current user profile
 export const getProfile = async (
   req: AuthRequest,
-  res: Response<ApiResponse>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-      select: {
-        id: true,
-        email: true,
-        subscriptionTier: true,
-        subscriptionStatus: true,
-        createdAt: true,
-        _count: {
-          select: {
-            listings: true,
-          },
-        },
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, req.user!.id),
+      with: {
+        listings: true,
       },
     });
 
+    if (!user) {
+      throw UnauthorizedError('User not found');
+    }
+
     res.json({
       success: true,
-      data: user,
+      data: {
+        id: user.id,
+        email: user.email,
+        subscriptionTier: user.subscriptionTier,
+        subscriptionStatus: user.subscriptionStatus,
+        createdAt: user.createdAt,
+        _count: {
+          listings: user.listings?.length || 0,
+        },
+      },
     });
   } catch (error) {
     next(error);
@@ -167,7 +172,7 @@ export const getProfile = async (
 // Update user profile
 export const updateProfile = async (
   req: AuthRequest,
-  res: Response<ApiResponse>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
@@ -190,23 +195,29 @@ export const updateProfile = async (
         throw BadRequestError('Current password is required to change password');
       }
 
-      const user = await prisma.user.findUnique({
-        where: { id: req.user!.id },
+      const user = await db.query.users.findFirst({
+        where: eq(users.id, req.user!.id),
       });
 
-      const isPasswordValid = await bcrypt.compare(currentPassword, user!.passwordHash);
+      if (!user) {
+        throw UnauthorizedError('User not found');
+      }
+
+      const isPasswordValid = await bcrypt.compare(currentPassword, user.passwordHash);
       if (!isPasswordValid) {
         throw UnauthorizedError('Current password is incorrect');
       }
     }
 
     // Prepare update data
-    const updateData: { email?: string; passwordHash?: string } = {};
+    const updateData: { email?: string; passwordHash?: string; updatedAt: Date } = {
+      updatedAt: new Date(),
+    };
 
     if (email) {
       // Check if email is already taken
-      const existingUser = await prisma.user.findUnique({
-        where: { email },
+      const existingUser = await db.query.users.findFirst({
+        where: eq(users.email, email),
       });
       if (existingUser && existingUser.id !== req.user!.id) {
         throw ConflictError('Email already in use');
@@ -220,16 +231,16 @@ export const updateProfile = async (
     }
 
     // Update user
-    const updatedUser = await prisma.user.update({
-      where: { id: req.user!.id },
-      data: updateData,
-      select: {
-        id: true,
-        email: true,
-        subscriptionTier: true,
-        subscriptionStatus: true,
-      },
-    });
+    const [updatedUser] = await db
+      .update(users)
+      .set(updateData)
+      .where(eq(users.id, req.user!.id))
+      .returning({
+        id: users.id,
+        email: users.email,
+        subscriptionTier: users.subscriptionTier,
+        subscriptionStatus: users.subscriptionStatus,
+      });
 
     res.json({
       success: true,

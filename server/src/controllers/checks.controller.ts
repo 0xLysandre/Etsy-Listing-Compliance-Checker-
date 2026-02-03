@@ -1,23 +1,25 @@
 import { Response, NextFunction } from 'express';
-import { prisma } from '../config/database.js';
+import { eq, desc, sql } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { listings, violationChecks } from '../db/schema.js';
 import { NotFoundError, ForbiddenError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
-import { ApiResponse, SUBSCRIPTION_LIMITS } from '../types/index.js';
+import { SUBSCRIPTION_LIMITS } from '../types/index.js';
 import { runComplianceCheck as runCheck } from '../services/compliance.service.js';
 
 // Run a compliance check on a listing
 export const runComplianceCheck = async (
   req: AuthRequest,
-  res: Response<ApiResponse>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
     const { listingId } = req.params;
 
     // Verify the listing exists and belongs to the user
-    const listing = await prisma.listing.findUnique({
-      where: { id: listingId },
-      select: { userId: true },
+    const listing = await db.query.listings.findFirst({
+      where: eq(listings.id, listingId),
+      columns: { userId: true },
     });
 
     if (!listing) {
@@ -33,12 +35,24 @@ export const runComplianceCheck = async (
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const checksThisMonth = await prisma.violationCheck.count({
-      where: {
-        listing: { userId: req.user!.id },
-        checkDate: { gte: startOfMonth },
-      },
-    });
+    // Get all user's listings to count checks
+    const userListings = await db
+      .select({ id: listings.id })
+      .from(listings)
+      .where(eq(listings.userId, req.user!.id));
+
+    const listingIds = userListings.map(l => l.id);
+
+    let checksThisMonth = 0;
+    if (listingIds.length > 0) {
+      const checksResult = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(violationChecks)
+        .where(
+          sql`${violationChecks.listingId} = ANY(${listingIds}) AND ${violationChecks.checkDate} >= ${startOfMonth}`
+        );
+      checksThisMonth = checksResult[0]?.count || 0;
+    }
 
     const limits = SUBSCRIPTION_LIMITS[req.user!.subscriptionTier];
     if (limits.maxChecksPerMonth !== -1 && checksThisMonth >= limits.maxChecksPerMonth) {
@@ -51,18 +65,12 @@ export const runComplianceCheck = async (
     const result = await runCheck(listingId);
 
     // Get full check details
-    const check = await prisma.violationCheck.findUnique({
-      where: { id: result.checkId },
-      include: {
+    const check = await db.query.violationChecks.findFirst({
+      where: eq(violationChecks.id, result.checkId),
+      with: {
         violations: {
-          include: {
-            policyRule: {
-              select: {
-                id: true,
-                ruleName: true,
-                category: true,
-              },
-            },
+          with: {
+            policyRule: true,
           },
         },
       },
@@ -80,16 +88,16 @@ export const runComplianceCheck = async (
 // Get check history for a listing
 export const getCheckHistory = async (
   req: AuthRequest,
-  res: Response<ApiResponse>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
     const { listingId } = req.params;
 
     // Verify the listing exists and belongs to the user
-    const listing = await prisma.listing.findUnique({
-      where: { id: listingId },
-      select: { userId: true },
+    const listing = await db.query.listings.findFirst({
+      where: eq(listings.id, listingId),
+      columns: { userId: true },
     });
 
     if (!listing) {
@@ -102,28 +110,30 @@ export const getCheckHistory = async (
 
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string) || 10));
-    const skip = (page - 1) * limit;
+    const offset = (page - 1) * limit;
 
-    const [checks, total] = await Promise.all([
-      prisma.violationCheck.findMany({
-        where: { listingId },
-        skip,
-        take: limit,
-        orderBy: { checkDate: 'desc' },
-        include: {
-          violations: {
-            select: {
-              id: true,
-              severity: true,
-              violationText: true,
-            },
+    const checks = await db.query.violationChecks.findMany({
+      where: eq(violationChecks.listingId, listingId),
+      offset,
+      limit,
+      orderBy: desc(violationChecks.checkDate),
+      with: {
+        violations: {
+          columns: {
+            id: true,
+            severity: true,
+            violationText: true,
           },
         },
-      }),
-      prisma.violationCheck.count({
-        where: { listingId },
-      }),
-    ]);
+      },
+    });
+
+    const totalResult = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(violationChecks)
+      .where(eq(violationChecks.listingId, listingId));
+
+    const total = totalResult[0]?.count || 0;
 
     res.json({
       success: true,
@@ -143,30 +153,23 @@ export const getCheckHistory = async (
 // Get specific check result
 export const getCheckResult = async (
   req: AuthRequest,
-  res: Response<ApiResponse>,
+  res: Response,
   next: NextFunction
 ) => {
   try {
-    const check = await prisma.violationCheck.findUnique({
-      where: { id: req.params.id },
-      include: {
+    const check = await db.query.violationChecks.findFirst({
+      where: eq(violationChecks.id, req.params.id),
+      with: {
         listing: {
-          select: {
+          columns: {
             id: true,
             title: true,
             userId: true,
           },
         },
         violations: {
-          include: {
-            policyRule: {
-              select: {
-                id: true,
-                ruleName: true,
-                category: true,
-                ruleText: true,
-              },
-            },
+          with: {
+            policyRule: true,
           },
         },
       },

@@ -1,8 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { prisma } from '../config/database.js';
+import { eq } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { users, listings, violationChecks } from '../db/schema.js';
+import type { SubscriptionTier } from '../db/schema.js';
 import { UnauthorizedError, ForbiddenError } from './errorHandler.js';
-import { SubscriptionTier } from '@prisma/client';
 
 export interface JwtPayload {
   userId: string;
@@ -42,9 +44,9 @@ export const authenticate = async (
     ) as JwtPayload;
 
     // Fetch user from database to ensure they still exist and get current subscription
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: {
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, decoded.userId),
+      columns: {
         id: true,
         email: true,
         subscriptionTier: true,
@@ -114,17 +116,21 @@ export const requireOwnership = (resourceType: 'listing' | 'check') => {
       let isOwner = false;
 
       if (resourceType === 'listing') {
-        const listing = await prisma.listing.findUnique({
-          where: { id: resourceId },
-          select: { userId: true },
+        const listing = await db.query.listings.findFirst({
+          where: eq(listings.id, resourceId),
+          columns: { userId: true },
         });
         isOwner = listing?.userId === req.user.id;
       } else if (resourceType === 'check') {
-        const check = await prisma.violationCheck.findUnique({
-          where: { id: resourceId },
-          include: { listing: { select: { userId: true } } },
+        const check = await db.query.violationChecks.findFirst({
+          where: eq(violationChecks.id, resourceId),
+          with: {
+            listing: {
+              columns: { userId: true },
+            },
+          },
         });
-        isOwner = check?.listing.userId === req.user.id;
+        isOwner = check?.listing?.userId === req.user.id;
       }
 
       if (!isOwner) {
