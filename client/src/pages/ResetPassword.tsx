@@ -1,18 +1,21 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, CheckCircle, Check, X } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Eye, EyeOff, CheckCircle, Check, X, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../hooks/useAuth';
 import { getErrorMessage } from '../services/api';
 
-export default function Register() {
-  const { register } = useAuth();
+export default function ResetPassword() {
+  const { resetPassword } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token');
+
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
 
   const passwordRequirements = [
     { text: 'At least 8 characters', met: password.length >= 8 },
@@ -24,8 +27,20 @@ export default function Register() {
   const allRequirementsMet = passwordRequirements.every((req) => req.met);
   const passwordsMatch = password === confirmPassword && confirmPassword.length > 0;
 
+  useEffect(() => {
+    if (!token) {
+      toast.error('Invalid or missing reset token');
+      navigate('/forgot-password');
+    }
+  }, [token, navigate]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!token) {
+      toast.error('Invalid reset token');
+      return;
+    }
 
     if (password !== confirmPassword) {
       toast.error('Passwords do not match');
@@ -40,9 +55,8 @@ export default function Register() {
     setIsLoading(true);
 
     try {
-      const message = await register({ email, password });
-      toast.success(message || 'Account created successfully!');
-      navigate('/dashboard');
+      await resetPassword(token, password);
+      setIsSuccess(true);
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
@@ -50,53 +64,78 @@ export default function Register() {
     }
   };
 
+  if (isSuccess) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+        <div className="w-full max-w-md">
+          <div className="rounded-lg bg-white p-8 shadow-lg text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+              <Check className="h-8 w-8 text-green-600" />
+            </div>
+            <h2 className="mt-6 text-2xl font-bold text-gray-900">
+              Password reset successful
+            </h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Your password has been successfully reset. You can now sign in with
+              your new password.
+            </p>
+            <Link to="/login" className="btn-primary mt-6 block w-full text-center">
+              Sign in
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!token) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+        <div className="w-full max-w-md">
+          <div className="rounded-lg bg-white p-8 shadow-lg text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-100">
+              <AlertCircle className="h-8 w-8 text-red-600" />
+            </div>
+            <h2 className="mt-6 text-2xl font-bold text-gray-900">
+              Invalid reset link
+            </h2>
+            <p className="mt-2 text-sm text-gray-600">
+              This password reset link is invalid or has expired. Please request a
+              new one.
+            </p>
+            <Link to="/forgot-password" className="btn-primary mt-6 block w-full text-center">
+              Request new link
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen">
-      {/* Left side - Form */}
-      <div className="flex flex-1 flex-col justify-center px-4 py-12 sm:px-6 lg:flex-none lg:px-20 xl:px-24">
-        <div className="mx-auto w-full max-w-sm lg:w-96">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+      <div className="w-full max-w-md">
+        <div className="rounded-lg bg-white p-8 shadow-lg">
           {/* Logo */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-center gap-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-500">
               <CheckCircle className="h-6 w-6 text-white" />
             </div>
             <span className="text-xl font-bold text-gray-900">EtsyCheck</span>
           </div>
 
-          <h2 className="mt-8 text-2xl font-bold text-gray-900">
-            Create your account
+          <h2 className="mt-8 text-center text-2xl font-bold text-gray-900">
+            Set new password
           </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Already have an account?{' '}
-            <Link
-              to="/login"
-              className="font-medium text-primary-600 hover:text-primary-500"
-            >
-              Sign in
-            </Link>
+          <p className="mt-2 text-center text-sm text-gray-600">
+            Your new password must be different from previously used passwords.
           </p>
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="mt-8 space-y-6">
             <div>
-              <label htmlFor="email" className="label">
-                Email address
-              </label>
-              <input
-                id="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="input"
-                placeholder="you@example.com"
-              />
-            </div>
-
-            <div>
               <label htmlFor="password" className="label">
-                Password
+                New password
               </label>
               <div className="relative">
                 <input
@@ -107,7 +146,7 @@ export default function Register() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="input pr-10"
-                  placeholder="Create a password"
+                  placeholder="Enter new password"
                 />
                 <button
                   type="button"
@@ -143,7 +182,7 @@ export default function Register() {
 
             <div>
               <label htmlFor="confirmPassword" className="label">
-                Confirm password
+                Confirm new password
               </label>
               <input
                 id="confirmPassword"
@@ -153,7 +192,7 @@ export default function Register() {
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 className="input"
-                placeholder="Confirm your password"
+                placeholder="Confirm new password"
               />
               {confirmPassword && (
                 <div
@@ -179,48 +218,16 @@ export default function Register() {
               disabled={isLoading || !allRequirementsMet || !passwordsMatch}
               className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isLoading ? 'Creating account...' : 'Create account'}
+              {isLoading ? 'Resetting password...' : 'Reset password'}
             </button>
 
-            <p className="text-center text-xs text-gray-500">
-              By creating an account, you agree to our{' '}
-              <a href="#" className="text-primary-600 hover:underline">
-                Terms of Service
-              </a>{' '}
-              and{' '}
-              <a href="#" className="text-primary-600 hover:underline">
-                Privacy Policy
-              </a>
-            </p>
+            <Link
+              to="/login"
+              className="block text-center text-sm font-medium text-gray-600 hover:text-gray-900"
+            >
+              Back to sign in
+            </Link>
           </form>
-        </div>
-      </div>
-
-      {/* Right side - Hero image */}
-      <div className="relative hidden flex-1 lg:block">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary-500 to-primary-700">
-          <div className="flex h-full flex-col items-center justify-center p-12 text-white">
-            <h2 className="text-4xl font-bold">Start free today</h2>
-            <p className="mt-4 max-w-md text-center text-lg text-primary-100">
-              Get 5 free listings and 10 compliance checks per month. No credit
-              card required.
-            </p>
-            <div className="mt-12 space-y-4">
-              {[
-                'Automatic policy violation detection',
-                'Suggestions for fixing violations',
-                'Track your compliance history',
-                'Export detailed reports',
-              ].map((feature, index) => (
-                <div key={index} className="flex items-center gap-3">
-                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-400">
-                    <Check className="h-4 w-4" />
-                  </div>
-                  <span>{feature}</span>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>

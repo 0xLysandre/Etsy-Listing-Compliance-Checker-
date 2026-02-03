@@ -12,6 +12,16 @@ CREATE TABLE users (
   subscription_tier subscription_tier NOT NULL DEFAULT 'FREE',
   subscription_status subscription_status NOT NULL DEFAULT 'ACTIVE',
   stripe_customer_id TEXT UNIQUE,
+  -- Email verification fields
+  email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  email_verification_token TEXT,
+  email_verification_expires TIMESTAMP,
+  -- Password reset fields
+  password_reset_token TEXT,
+  password_reset_expires TIMESTAMP,
+  -- Refresh token for "remember me"
+  refresh_token TEXT,
+  refresh_token_expires TIMESTAMP,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );

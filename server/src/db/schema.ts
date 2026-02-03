@@ -45,6 +45,16 @@ export const users = pgTable('users', {
   subscriptionTier: subscriptionTierEnum('subscription_tier').default('FREE').notNull(),
   subscriptionStatus: subscriptionStatusEnum('subscription_status').default('ACTIVE').notNull(),
   stripeCustomerId: text('stripe_customer_id').unique(),
+  // Email verification fields
+  emailVerified: boolean('email_verified').default(false).notNull(),
+  emailVerificationToken: text('email_verification_token'),
+  emailVerificationExpires: timestamp('email_verification_expires'),
+  // Password reset fields
+  passwordResetToken: text('password_reset_token'),
+  passwordResetExpires: timestamp('password_reset_expires'),
+  // Refresh token for "remember me"
+  refreshToken: text('refresh_token'),
+  refreshTokenExpires: timestamp('refresh_token_expires'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

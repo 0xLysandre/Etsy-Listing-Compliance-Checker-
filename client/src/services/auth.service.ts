@@ -1,9 +1,10 @@
-import { api } from './api';
-import type { AuthResponse, User, ApiResponse } from '../types';
+import { api, tokenManager } from './api';
+import type { AuthResponse, User, ApiResponse, MessageResponse } from '../types';
 
 export interface LoginCredentials {
   email: string;
   password: string;
+  rememberMe?: boolean;
 }
 
 export interface RegisterCredentials {
@@ -11,27 +12,32 @@ export interface RegisterCredentials {
   password: string;
 }
 
+export interface ResetPasswordData {
+  token: string;
+  password: string;
+}
+
 export const authService = {
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
     const response = await api.post<ApiResponse<AuthResponse>>('/auth/login', credentials);
-    const { user, token } = response.data.data!;
+    const { user, accessToken, refreshToken } = response.data.data!;
 
-    // Store token and user in localStorage
-    localStorage.setItem('token', token);
+    // Store tokens and user in localStorage
+    tokenManager.setTokens(accessToken, refreshToken);
     localStorage.setItem('user', JSON.stringify(user));
 
-    return { user, token };
+    return { user, accessToken, refreshToken };
   },
 
   async register(credentials: RegisterCredentials): Promise<AuthResponse> {
     const response = await api.post<ApiResponse<AuthResponse>>('/auth/register', credentials);
-    const { user, token } = response.data.data!;
+    const { user, accessToken, refreshToken, message } = response.data.data!;
 
-    // Store token and user in localStorage
-    localStorage.setItem('token', token);
+    // Store tokens and user in localStorage
+    tokenManager.setTokens(accessToken, refreshToken);
     localStorage.setItem('user', JSON.stringify(user));
 
-    return { user, token };
+    return { user, accessToken, refreshToken, message };
   },
 
   async getProfile(): Promise<User> {
@@ -39,9 +45,34 @@ export const authService = {
     return response.data.data!;
   },
 
-  logout(): void {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+  async logout(): Promise<void> {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // Ignore errors during logout
+    } finally {
+      tokenManager.clearTokens();
+    }
+  },
+
+  async verifyEmail(token: string): Promise<MessageResponse> {
+    const response = await api.post<ApiResponse<MessageResponse>>('/auth/verify-email', { token });
+    return response.data.data!;
+  },
+
+  async resendVerification(): Promise<MessageResponse> {
+    const response = await api.post<ApiResponse<MessageResponse>>('/auth/resend-verification');
+    return response.data.data!;
+  },
+
+  async forgotPassword(email: string): Promise<MessageResponse> {
+    const response = await api.post<ApiResponse<MessageResponse>>('/auth/forgot-password', { email });
+    return response.data.data!;
+  },
+
+  async resetPassword(data: ResetPasswordData): Promise<MessageResponse> {
+    const response = await api.post<ApiResponse<MessageResponse>>('/auth/reset-password', data);
+    return response.data.data!;
   },
 
   getStoredUser(): User | null {
@@ -55,7 +86,7 @@ export const authService = {
   },
 
   getStoredToken(): string | null {
-    return localStorage.getItem('token');
+    return tokenManager.getAccessToken();
   },
 
   isAuthenticated(): boolean {

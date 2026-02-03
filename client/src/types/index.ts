@@ -7,6 +7,7 @@ export type CheckStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED';
 export interface User {
   id: string;
   email: string;
+  emailVerified: boolean;
   subscriptionTier: SubscriptionTier;
   subscriptionStatus: SubscriptionStatus;
   createdAt?: string;
@@ -14,7 +15,18 @@ export interface User {
 
 export interface AuthResponse {
   user: User;
-  token: string;
+  accessToken: string;
+  refreshToken: string;
+  message?: string;
+}
+
+export interface TokenRefreshResponse {
+  accessToken: string;
+  refreshToken: string;
+}
+
+export interface MessageResponse {
+  message: string;
 }
 
 // Listing types

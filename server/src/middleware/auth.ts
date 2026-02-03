@@ -9,12 +9,14 @@ import { UnauthorizedError, ForbiddenError } from './errorHandler.js';
 export interface JwtPayload {
   userId: string;
   email: string;
+  type?: 'access' | 'refresh';
 }
 
 export interface AuthRequest extends Request {
   user?: {
     id: string;
     email: string;
+    emailVerified: boolean;
     subscriptionTier: SubscriptionTier;
   };
 }
@@ -43,12 +45,18 @@ export const authenticate = async (
       process.env.JWT_SECRET || 'default-secret'
     ) as JwtPayload;
 
+    // Check if it's an access token (not a refresh token)
+    if (decoded.type === 'refresh') {
+      throw UnauthorizedError('Invalid token type');
+    }
+
     // Fetch user from database to ensure they still exist and get current subscription
     const user = await db.query.users.findFirst({
       where: eq(users.id, decoded.userId),
       columns: {
         id: true,
         email: true,
+        emailVerified: true,
         subscriptionTier: true,
         subscriptionStatus: true,
       },
@@ -65,6 +73,7 @@ export const authenticate = async (
     req.user = {
       id: user.id,
       email: user.email,
+      emailVerified: user.emailVerified,
       subscriptionTier: user.subscriptionTier,
     };
 
@@ -78,6 +87,25 @@ export const authenticate = async (
       next(error);
     }
   }
+};
+
+// Middleware to require email verification
+export const requireVerifiedEmail = (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  if (!req.user) {
+    return next(UnauthorizedError('Authentication required'));
+  }
+
+  if (!req.user.emailVerified) {
+    return next(
+      ForbiddenError('Please verify your email address to access this feature')
+    );
+  }
+
+  next();
 };
 
 // Middleware to check subscription tier
