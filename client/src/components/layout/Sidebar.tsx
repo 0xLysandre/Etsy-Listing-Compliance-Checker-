@@ -6,6 +6,7 @@ import {
   Settings,
   X,
   CheckCircle,
+  Wrench,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -18,6 +19,7 @@ const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Listings', href: '/listings', icon: ShoppingBag },
   { name: 'Policy Rules', href: '/rules', icon: Shield },
+  { name: 'Manage Rules', href: '/admin/rules', icon: Wrench },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 

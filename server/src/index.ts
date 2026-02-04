@@ -16,6 +16,7 @@ import authRoutes from './routes/auth.routes.js';
 import listingsRoutes from './routes/listings.routes.js';
 import checksRoutes from './routes/checks.routes.js';
 import rulesRoutes from './routes/rules.routes.js';
+import adminRoutes from './routes/admin.routes.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -41,6 +42,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/listings', listingsRoutes);
 app.use('/api/checks', checksRoutes);
 app.use('/api/rules', rulesRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Error handling
 app.use(notFoundHandler);

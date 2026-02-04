@@ -11,6 +11,7 @@ import Listings from './pages/Listings';
 import ListingDetail from './pages/ListingDetail';
 import NewListing from './pages/NewListing';
 import PolicyRules from './pages/PolicyRules';
+import AdminPolicyRules from './pages/AdminPolicyRules';
 import Settings from './pages/Settings';
 
 // Protected route wrapper
@@ -105,6 +106,7 @@ function App() {
         <Route path="listings/new" element={<NewListing />} />
         <Route path="listings/:id" element={<ListingDetail />} />
         <Route path="rules" element={<PolicyRules />} />
+        <Route path="admin/rules" element={<AdminPolicyRules />} />
         <Route path="settings" element={<Settings />} />
       </Route>
 
